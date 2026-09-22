@@ -126,3 +126,48 @@ async fn undeclared_high_entropy_value_produces_a_warning_not_a_failure() {
         "expected a high-entropy warning, got: {warnings:?}"
     );
 }
+
+const REAL_JWT: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE4LCJleHAiOjE3OTc4Mzk5MzMsImlzcyI6InVuaWFyIn0.qVh0mYQ9k3sT7pR2wX5cN8dL1fG4jB6hK0aZ3eU7vI4";
+
+/// The regression test for the real proof run against `uniar-api`: six live
+/// JWTs shipped in a document whose 41 warnings went nowhere, because the
+/// emission step ran inside a passing `#[tokio::test]` and libtest captures
+/// (and discards) the stdout/stderr of every passing test. The warning fired
+/// every time and nobody could see it. So the warning must travel *in the
+/// artifact*, not only down a channel the test harness swallows.
+#[tokio::test]
+async fn undeclared_high_entropy_warning_appears_in_the_document_itself() {
+    let app = support::build();
+    support::send(app, "GET", "/session", &[], None).await;
+
+    let doc = support::emit();
+    let warnings: Vec<&str> = doc["info"]["x-cyanotype-warnings"]
+        .as_array()
+        .expect("a document with warnings must carry them at info → x-cyanotype-warnings")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("high-entropy") && w.contains("GET /session") && w.contains("token")),
+        "the JWT in the response body must be named in the artifact's own warnings: {warnings:?}"
+    );
+    // Warn-only, never redact-on-guess (§4.6): the value is still embedded,
+    // because nothing declared `token`. The warning is the whole mechanism.
+    assert!(doc.to_string().contains(REAL_JWT));
+}
+
+#[tokio::test]
+async fn an_operation_below_the_sample_threshold_is_named_in_the_document() {
+    let app = support::build();
+    support::send(app, "GET", "/health", &[], None).await;
+
+    let doc = support::emit();
+    let warnings = doc["info"]["x-cyanotype-warnings"].to_string();
+    assert!(
+        warnings.contains("GET /health 200") && warnings.contains("below the threshold"),
+        "§4.3 requires the generator to warn about sub-threshold operations: {warnings}"
+    );
+}
