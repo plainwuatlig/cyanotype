@@ -1,14 +1,12 @@
 //! §5's acceptance measurement: adoption cost in lines actually changed.
 //!
-//! The earlier version of this file measured by inspection, because the task
-//! forbade modifying `uniar-api` while §5 asked for the recorder to be run
-//! against it. That tension is gone: the recorder **has** been run against
-//! `uniar-api`'s real suite, on the unpushed branch `experiment/cyanotype`
-//! in that repo (117 passed, 1 pre-existing failure, 45 operations over 38
-//! paths). What follows is the change that run actually made, not the change
-//! it was predicted to make.
+//! This file first measured by inspection, before the recorder was run against
+//! a real service. That is over: it **has** been run against the first
+//! consumer's own suite (117 passed, 1 pre-existing unrelated failure, 45
+//! operations over 38 paths). What follows is the change that run actually
+//! made, not the change it was predicted to make.
 //!
-//! `uniar-api/src/app.rs` before (read 2026-09-22):
+//! That service's test helper, before (read 2026-09-22):
 //!
 //! ```text
 //! pub fn build(cfg: Config, pools: Pools) -> Router {
@@ -33,25 +31,24 @@
 //! }
 //! ```
 //!
-//! The earlier one-line figure was measured against `ls-api-rs`, whose test
-//! helper has a different shape and *can* take the wrapper directly. Both
-//! numbers are honest; only one of them is about the repo §5 chose.
+//! An earlier one-line figure came from a second service whose test helper has
+//! a different shape and *can* take the wrapper directly. Both numbers are
+//! honest; this is the one measured on the acceptance target.
 //!
 //! The 58 `.oneshot(...)` call sites are untouched either way, because they
 //! all route through this one function — which is what §3's "one line in a
 //! test helper" budget rests on.
 //!
 //! One number in the spec's own framing didn't hold up under a direct count:
-//! `src/http/routes.rs` has 76 `.route(...)` registrations, not the "35
-//! routes" §5 cites (ticket provenance for that figure wasn't re-read, per
-//! the instruction to trust the spec over the tickets) — some of that gap is
+//! the service has 76 `.route(...)` registrations, not the "35 routes" §5
+//! cites — some of that gap is
 //! routes registered more than once under different API version prefixes
 //! (`/api/v1/...` and `/api/v2/...` for the same handler) and method-only
 //! variations, but 76 vs. 35 is more than that alone plausibly explains.
 //! Reported here rather than quietly adopted.
 
-/// The recording half of the change, reproduced verbatim from what the proof
-/// branch actually contains (not a paraphrase).
+/// The recording half of the change, as the proof branch actually made it —
+/// the shapes below are that diff, not a paraphrase of an intention.
 const BEFORE: &str = "\
 pub fn build(cfg: Config, pools: Pools) -> Router {
     routes::router(cfg, pools)
@@ -67,8 +64,8 @@ pub fn build(cfg: Config, pools: Pools) -> Router {
 
 /// §4.6's declaration is *additional* setup, not part of the recording cost —
 /// but it is not optional in a service that returns a token, and the proof run
-/// needed it: the recorder's own warning named `response POST
-/// /vue-api/v1/login data.token`, and the author's half of §4.6 is the
+/// needed it: the recorder's own warning named a live token in a response
+/// body (`response POST /login data.token`), and the author's half of §4.6 is the
 /// decision. Repos with nothing to redact stop at [`AFTER`].
 const AFTER_WITH_DECLARED_REDACTION: &str = "\
 pub fn build(cfg: Config, pools: Pools) -> Router {

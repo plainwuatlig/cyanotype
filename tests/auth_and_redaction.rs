@@ -129,8 +129,8 @@ async fn undeclared_high_entropy_value_produces_a_warning_not_a_failure() {
 
 const REAL_JWT: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE4LCJleHAiOjE3OTc4Mzk5MzMsImlzcyI6InVuaWFyIn0.qVh0mYQ9k3sT7pR2wX5cN8dL1fG4jB6hK0aZ3eU7vI4";
 
-/// The regression test for the real proof run against `uniar-api`: six live
-/// JWTs shipped in a document whose 41 warnings went nowhere, because the
+/// The regression test for the real proof run: six live JWTs shipped in a
+/// document whose 41 warnings went nowhere, because the
 /// emission step ran inside a passing `#[tokio::test]` and libtest captures
 /// (and discards) the stdout/stderr of every passing test. The warning fired
 /// every time and nobody could see it. So the warning must travel *in the

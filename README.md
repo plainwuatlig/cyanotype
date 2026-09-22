@@ -7,9 +7,8 @@ emit `openapi.json` whenever you choose.
 
 The document isn't a claim of completeness. It's an impression of what the
 tests actually touched — derived, not written. A contact print, not a
-drawing. See `spec.md` in this repository's origin (`~/Working/ai/plain/.scratch/rswag-rs/spec.md`)
-for the full design brief this crate was built against, and `DESIGN.md` for
-the two decisions that brief deliberately left open.
+drawing. See `DESIGN.md` for the two decisions the design brief deliberately
+left open, and the rejected alternatives behind each.
 
 ## Usage
 
@@ -52,11 +51,11 @@ async fn zzzz_emit_openapi() {
 
 **The trap, measured.** libtest runs tests in lexicographic order of their
 full path, so a test named `zzz_…` inside a module sorts *before* every later
-module. In the proof run against `uniar-api`, `app::tests::zzz_emit_openapi`
-ran at position 65 of 118 — `users::tests::…` and `v2_content::tests::…` ran
-after it, and whatever they recorded was never emitted. A `zzzz` prefix at the
-crate root sorts after every module name, which is the version that works by
-construction rather than by luck.
+module. In the proof run the emission test sat inside one, and ran at
+position 65 of 118 — 53 tests in later modules ran after it, and whatever they
+recorded was never emitted. A `zzzz` prefix at the crate root sorts after
+every module name, which is the version that works by construction rather than
+by luck.
 
 Measured impact of the trap in this suite: none. Trapped and untrapped runs
 emit the same 45 operations over the same 38 paths, the same 61 (operation,
@@ -129,11 +128,11 @@ Warnings are of two kinds, in the same array, and they arrive differently
 because they cost differently:
 
 - **Undeclared high-entropy strings** (§4.6) — one entry each, naming the site
-  (`response POST /vue-api/v1/login data.token`). Security, so it stays
+  (`response POST /sessions data.token`). Security, so it stays
   impossible to miss.
 - **Every operation below §4.3's sample threshold** — **one aggregated notice**
-  naming all of them, not one entry per operation. On the measured `uniar-api`
-  run that is all 50 of the 61 (operation, status) pairs, and phrasing them
+  naming all of them, not one entry per operation. On the measured run that is
+  all 50 of the 61 (operation, status) pairs, and phrasing them
   individually cost ~6.8 KB of a 33 KB document — roughly 4k agent tokens. The
   notice repeats no sample counts: each response already carries its own
   `x-cyanotype-samples`.
@@ -167,16 +166,14 @@ Per `spec.md` §5, two numbers are published here rather than assumed.
 
 ### Adoption cost
 
-The acceptance target is `uniar-api-rs`
-(`~/Projects/backend/uniar/rust/uniar-api`), per the spec — and it has now
-been **literally run against it** — on the branch `experiment/cyanotype` in
-that repo, since merged to its `main` as `285c461`: 117 tests pass, 1 fails
-pre-existing (`image_version_missing` expects 404 where the endpoint returns
-200; `cyanotype` added no failures), and the recorder emitted a 33 KB document
-covering 45 operations across 38 paths.
+The acceptance target was the first consumer — a private production
+Rust/axum service — and the recorder has now been **literally run against its
+real suite**: 117 tests pass, 1 fails pre-existing and unrelated (`cyanotype`
+added no failures), and it emitted a 33 KB document covering 45 operations
+across 38 paths.
 
 The claim was one line. The measured cost is **three**, and the difference is
-the shape of `uniar-api` rather than anything about this crate:
+the shape of that service rather than anything about this crate:
 
 ```diff
  pub fn build(cfg: Config, pools: Pools) -> Router {
@@ -194,9 +191,9 @@ test-only helper to wrap, so the recorder has to be gated behind
 added. Plus one line under `[dev-dependencies]`. Every one of the 58 `oneshot`
 call sites is untouched, because they all route through this one function.
 
-The earlier one-line figure was measured against `ls-api-rs`, whose test helper
-has a different shape and can take the wrapper directly. Both numbers are
-honest; only one of them is about the repo the spec chose.
+An earlier one-line figure came from a second service whose test helper has a
+different shape and can take the wrapper directly. Both numbers are honest;
+this is the one measured on the acceptance target.
 
 For clawspec's yardstick (463 lines of scaffolding for 5 paths / 9
 operations): this crate's recording-side cost doesn't scale with route or

@@ -174,7 +174,7 @@ fn content_type_of(headers: &HeaderMap) -> Option<String> {
 }
 
 /// axum 0.7's `MatchedPath` reports its own routing syntax (`:id`, `*rest`),
-/// not OpenAPI's (`{id}`). `uniar-api`'s routes are written with axum 0.7
+/// not OpenAPI's (`{id}`). The first consumer's routes are written with axum 0.7
 /// syntax throughout, so this conversion is required, not cosmetic — see
 /// `README.md` for why a wildcard segment (`*rest`) is mapped to a single
 /// named parameter rather than something OpenAPI has no equivalent for.
