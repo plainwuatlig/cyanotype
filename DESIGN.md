@@ -77,13 +77,15 @@ the response body for capture (`layer.rs`). `receipt.declare_response::<T>`:
   shared lookup key and no race. Rejected: a global "most recent match"
   API — cheap to write, wrong under `cargo test`'s default parallelism.
 
-- **Why request bodies are out of scope for v1.** The friction §4.2
-  addresses is server-authored ad hoc `json!()` responses with no Rust
+- **Why request-body *declaration* is out of scope for v1.** The friction
+  §4.2 addresses is server-authored ad hoc `json!()` responses with no Rust
   type behind them. Request bodies in these tests are already
   caller-constructed Rust values (`json!({...})` literals or already-typed
   structs at the call site) — the test author already has the shape in
   hand and doesn't need `cyanotype` to help them declare something they
-  just wrote. Symmetric request-side declaration is a small extension
+  just wrote. (Request bodies are still *recorded and emitted*, by
+  inference, per §3 — see `openapi.rs`'s `requestBody` assembly. What is
+  cut here is only the declaration API, `declare_request`.) Symmetric request-side declaration is a small extension
   (attach a `Receipt` to the request extensions too) if it turns out to be
   wanted; cut for v1 on measured absence of need, not difficulty.
 
@@ -182,54 +184,46 @@ silently accepted.
 
 ---
 
-## 3. §4.4 (descriptions) is not implemented — found by review, not by the
-   original build, and recorded here for exactly that reason
+## 3. §4.4 (descriptions) — cut from the spec on 2026-09-22
 
 Independent code review (`code-review` skill, spec axis) caught that §4.4
-("Prose lives as handler doc comments... They are code, reviewed with the
-code, cannot drift from what they describe") has no implementation at all,
-and that this had gone undisclosed in both DESIGN.md and the README's own
-Limitations list — a silent drop, not a stated cut. This section exists to
-close that gap in disclosure, and to explain why it's a cut rather than a
-bug.
+("Prose lives as handler doc comments...") had no implementation at all, and
+that this had gone undisclosed in both DESIGN.md and the README's own
+Limitations list — a silent drop, not a stated cut. This section closed the
+disclosure gap; the ruling has since closed the gap itself. **§4.4 is cut from
+the spec** (`spec.md`'s "Not in v1" table, amended 2026-09-22), so this is no
+longer an open question and no longer a defect: it is the product.
 
-**The obstacle is structural, not effort.** A Rust `///` doc comment
-compiles to a `#[doc = "..."]` attribute, which is only visible at
-*compile time*, to a macro applied to the item that carries it. There is no
-runtime API that lets `cyanotype`'s recorder — which only ever sees
-`http::Request`/`http::Response` values crossing a `tower::Layer`, with no
-knowledge of which Rust function produced them — read a handler function's
-doc comment while a test is running.
+**The obstacle was structural, not effort.** A Rust `///` doc comment compiles
+to a `#[doc = "..."]` attribute, which is only visible at *compile time*, to a
+macro applied to the item that carries it. There is no runtime API that lets
+`cyanotype`'s recorder — which only ever sees `http::Request`/`http::Response`
+values crossing a `tower::Layer`, with no knowledge of which Rust function
+produced them — read a handler function's doc comment while a test is running.
 
-**Two ways to bridge that gap, both rejected for v1:**
+**Two ways to bridge that gap, both rejected — now permanently:**
 
 - **An overlay** — a separate place the author writes each operation's
-  description, keyed by method+route. This is exactly what §4.4 argues
-  against by name ("There is no overlay... Ticket 07's overlay... died with
-  AXI") and would reintroduce the drift problem doc comments were chosen to
-  avoid. Rejected on the spec's own stated reasoning, not a new judgement.
+  description, keyed by method+route. This is exactly what §4.4 argued against
+  by name ("There is no overlay... Ticket 07's overlay... died with AXI") and
+  would reintroduce the drift problem doc comments were chosen to avoid.
+  Rejected on the spec's own stated reasoning, not a new judgement.
 - **A companion attribute proc-macro** (e.g. `#[cyanotype::documented(method
   = "GET", route = "/users/{id}")]` above each handler fn), which captures
   the fn's `#[doc]` attribute at compile time and registers `(method, route)
   -> description` into a static table the recorder can consult at request
-  time. This is the technically correct fix and doesn't reintroduce an
-  overlay (the prose still lives in the doc comment) — but it requires
-  annotating *every documented handler* with its own route redundantly
-  (the macro can't see what `.route(...)` call will attach the fn to,
-  since that happens later, elsewhere), which is real per-handler ceremony
-  running directly against §3's one-line adoption budget being "the
-  product's single differentiator." It also means a second crate
-  (`cyanotype` isn't itself a proc-macro crate) — defensible as a companion
-  the way `serde`/`serde_derive` split, but a larger surface than this
-  build's time budget covers.
+  time. Technically correct, and it doesn't reintroduce an overlay — but it
+  requires annotating *every documented handler* with its own route
+  redundantly (the macro can't see what `.route(...)` call will attach the fn
+  to, since that happens later, elsewhere), which is real per-handler ceremony
+  running directly against §3's one-line adoption budget being "the product's
+  single differentiating factor." It also means a second crate (`cyanotype`
+  isn't itself a proc-macro crate) — defensible as a companion the way
+  `serde`/`serde_derive` split, but a larger surface than v1 covers.
 
-**Decision: cut for v1, not attempted.** Given the choice between an overlay
-the spec explicitly rejects and a proc-macro crate whose per-handler
-annotation cost undermines the adoption claim this whole crate is built to
-prove, neither was worth building speculatively within this task's scope.
-Flagged here, in the README's Limitations list, and in a code comment at the
-one place (`src/openapi.rs`) where a reader might otherwise mistake the
-generic per-status `"description"` field for operation-level documentation —
-it isn't; it's a fixed placeholder ("Observed 200 response."), unrelated to
-§4.4. This is a real, disclosed gap in spec coverage, not a design decision
-Plain has ruled on — it should be treated as open, not settled.
+**Consequence for a consumer:** an agent reading the emitted document gets no
+prose about what an operation is *for*. The generic per-status `"description"`
+field ("Observed 200 response.") is a fixed placeholder derived from the
+recording — it is not operation-level documentation, and a reader must not
+mistake it for the doc comment of the handler behind the route. That cost is
+accepted knowingly, not overlooked.

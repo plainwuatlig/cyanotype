@@ -186,16 +186,25 @@ measurement.
 
 ## Limitations, stated rather than discovered
 
-- **§4.4 (descriptions) is not implemented.** The spec's model is that
-  operation prose lives in handler doc comments, never a separate overlay.
-  Rust doc comments aren't reachable at runtime without a companion
-  proc-macro crate, and the alternative (an overlay keyed by method+route)
-  is exactly what the spec rules out by name. Neither was built for v1 — see
-  `DESIGN.md` §3 for the two rejected paths and why. Every response's
-  `description` field in the emitted document is a fixed placeholder
-  ("Observed 200 response."), not derived from any handler. This gap was
-  caught by this build's own code review, not designed around from the
-  start — recorded here for exactly that reason.
+- **§4.4 (descriptions) is cut from the spec**, by ruling on 2026-09-22, not
+  pending. A `///` doc comment compiles to a `#[doc]` attribute readable only
+  at compile time by a macro on the item carrying it, and the recorder sees
+  `Request`/`Response` values crossing a `tower::Layer` with no knowledge of
+  which function produced them. The overlay that would bridge it is what the
+  spec rejects by name; the companion proc-macro crate needs every documented
+  handler annotated with its own route redundantly, against §3's one-line
+  adoption budget. Every response's `description` field in the emitted
+  document is therefore a fixed placeholder ("Observed 200 response."),
+  derived from the recording and not from any handler — a reader must not
+  mistake it for the handler's doc comment. See `spec.md`'s "Not in v1" table
+  and `DESIGN.md` §3.
+- Request bodies are documented only when they're JSON. A non-JSON request
+  body is recorded as content-type and length and nothing else (`DESIGN.md`
+  §2), so the operation gets no `requestBody` at all — the document says
+  nothing rather than guessing a media type it never retained.
+- §4.3's sample threshold is a constant (`MIN_SAMPLES_FOR_REQUIRED`), not a
+  configuration API. The spec says "default 2", implying a knob; there is no
+  `configure`-style surface for it in v1.
 - Only the `Authorization` header is treated as a candidate auth header —
   a custom header like `X-Api-Key` is never detected or stripped. If a
   service authenticates that way, its key would need to be caught by the
