@@ -13,6 +13,11 @@ use serde_json::{Value, json};
 
 const MAX_EXAMPLES: usize = 10;
 
+/// §4.3's `required` threshold: a field is only ever asserted as required at
+/// N >= this, and only when it appeared in *every* sample. Shared with
+/// `openapi.rs`, which warns about the operations that fall short of it.
+pub(crate) const MIN_SAMPLES_FOR_REQUIRED: usize = 2;
+
 /// Infer a JSON Schema fragment describing every sample in `samples`.
 /// `samples` is every observed body for one (route, method, status) —
 /// `x-cyanotype-samples` is `samples.len()` and is attached by the caller,
@@ -75,7 +80,7 @@ fn infer_object(objects: &[&Value]) -> Value {
                 values.push(v.clone());
             }
         }
-        if n >= 2 && present_count == n {
+        if n >= MIN_SAMPLES_FOR_REQUIRED && present_count == n {
             required.push((*key).to_string());
         }
         properties.insert((*key).to_string(), infer_schema(&values));

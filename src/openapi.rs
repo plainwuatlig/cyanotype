@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 
 use crate::exchange::{BodyCapture, Exchange};
-use crate::infer::infer_schema;
+use crate::infer::{MIN_SAMPLES_FOR_REQUIRED, infer_schema};
 
 const GENERATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -21,7 +21,7 @@ struct StatusAcc {
     /// `x-cyanotype-samples` reports, per §4.3's "always emitted... on every
     /// operation" (interpreted per response-status, since that's the
     /// granularity inference itself operates at).
-    sample_count: u32,
+    sample_count: usize,
     json_samples: Vec<Value>,
     declared_schema: Option<Value>,
 }
@@ -30,6 +30,14 @@ struct StatusAcc {
 struct OperationAcc {
     by_status: BTreeMap<u16, StatusAcc>,
     security_schemes: BTreeSet<String>,
+    /// Every request observed at this operation, whatever its body looked
+    /// like — the denominator for deciding whether a request body is
+    /// mandatory.
+    requests_observed: usize,
+    /// JSON request bodies captured for this operation (§3). Consolidated
+    /// across statuses, because a request body belongs to the operation, not
+    /// to one of its responses.
+    request_samples: Vec<serde_json::Value>,
 }
 
 /// `{name}` segments in a route template become OpenAPI `parameters`
@@ -50,7 +58,92 @@ fn path_parameters(route: &str) -> Vec<Value> {
         .collect()
 }
 
-pub(crate) fn build_document(exchanges: &[Exchange]) -> Value {
+/// Assemble the document, appending every generator warning it produces to
+/// `warnings` (§4.3's below-threshold notice). Warnings recorded while
+/// recording was in progress (undeclared high-entropy strings, §4.6;
+/// truncated bodies) are the caller's to prepend — see
+/// [`crate::Collected::warnings`].
+/// One operation object, plus every warning its evidence provokes.
+fn operation_object(
+    key: &OperationKey,
+    acc: &OperationAcc,
+    warnings: &mut Vec<String>,
+) -> Value {
+    let mut responses = Map::new();
+    for (status, status_acc) in &acc.by_status {
+        if status_acc.sample_count < MIN_SAMPLES_FOR_REQUIRED {
+            warnings.push(format!(
+                "{} {} {}: only {} sample(s) observed, below the threshold of {} — \
+                 `required` is not asserted; add a test, or declare the type",
+                key.method.to_ascii_uppercase(),
+                key.route,
+                status,
+                status_acc.sample_count,
+                MIN_SAMPLES_FOR_REQUIRED
+            ));
+        }
+        // This is a generic, response-object-level description, not the
+        // operation-level prose §4.4 means ("handler doc comments").
+        // §4.4 is cut, not implemented — see `spec.md`'s "Not in v1" table,
+        // `DESIGN.md` §3, and README's Limitations for the disclosure.
+        let mut response_obj = json!({
+            "description": format!("Observed {status} response."),
+            "x-cyanotype-samples": status_acc.sample_count,
+        });
+
+        let schema = status_acc.declared_schema.clone().or_else(|| {
+            (!status_acc.json_samples.is_empty())
+                .then(|| infer_schema(&status_acc.json_samples))
+        });
+
+        if let Some(schema) = schema {
+            response_obj["content"] = json!({ "application/json": { "schema": schema } });
+        }
+
+        responses.insert(status.to_string(), response_obj);
+    }
+
+    let mut operation_obj = json!({ "responses": responses });
+
+    // §3: request bodies are recorded, so they are documented. Only JSON
+    // bodies were ever retained (`DESIGN.md` §2), so `application/json` is
+    // the only media type we can honestly claim.
+    if !acc.request_samples.is_empty() {
+        let mut request_body = json!({
+            "content": {
+                "application/json": {
+                    "schema": infer_schema(&acc.request_samples),
+                }
+            },
+            "x-cyanotype-samples": acc.request_samples.len(),
+        });
+        // `required` follows §4.3's rule for the response side: asserted only
+        // from N >= 2, and only when *every* observed request carried one.
+        if acc.requests_observed >= MIN_SAMPLES_FOR_REQUIRED
+            && acc.request_samples.len() == acc.requests_observed
+        {
+            request_body["required"] = Value::Bool(true);
+        }
+        operation_obj["requestBody"] = request_body;
+    }
+
+    let params = path_parameters(&key.route);
+    if !params.is_empty() {
+        operation_obj["parameters"] = Value::Array(params);
+    }
+    if !acc.security_schemes.is_empty() {
+        operation_obj["security"] = Value::Array(
+            acc.security_schemes
+                .iter()
+                .map(|name| json!({ name.clone(): [] }))
+                .collect(),
+        );
+    }
+
+    operation_obj
+}
+
+pub(crate) fn build_document(exchanges: &[Exchange], warnings: &mut Vec<String>) -> Value {
     let mut operations: BTreeMap<OperationKey, OperationAcc> = BTreeMap::new();
     let mut security_scheme_defs: BTreeMap<String, Value> = BTreeMap::new();
     let mut component_schemas: Map<String, Value> = Map::new();
@@ -68,6 +161,11 @@ pub(crate) fn build_document(exchanges: &[Exchange]) -> Value {
             method: exchange.method.as_str().to_ascii_lowercase(),
         };
         let acc = operations.entry(key).or_default();
+        acc.requests_observed += 1;
+        if let BodyCapture::Json(value) = &exchange.request.body {
+            acc.request_samples.push(value.clone());
+        }
+
         let status_acc = acc.by_status.entry(status).or_default();
         status_acc.sample_count += 1;
 
@@ -98,50 +196,12 @@ pub(crate) fn build_document(exchanges: &[Exchange]) -> Value {
 
     let mut paths: Map<String, Value> = Map::new();
     for (key, acc) in operations {
-        let mut responses = Map::new();
-        for (status, status_acc) in acc.by_status {
-            // This is a generic, response-object-level description, not the
-            // operation-level prose §4.4 means ("handler doc comments").
-            // §4.4 is NOT implemented — see the "Descriptions (§4.4)" section
-            // in DESIGN.md for why (Rust doc comments aren't reachable at
-            // runtime without a companion proc-macro crate, which is out of
-            // scope for v1) and README's Limitations for the disclosure.
-            let mut response_obj = json!({
-                "description": format!("Observed {status} response."),
-                "x-cyanotype-samples": status_acc.sample_count,
-            });
-
-            let schema = status_acc.declared_schema.or_else(|| {
-                (!status_acc.json_samples.is_empty())
-                    .then(|| infer_schema(&status_acc.json_samples))
-            });
-
-            if let Some(schema) = schema {
-                response_obj["content"] = json!({ "application/json": { "schema": schema } });
-            }
-
-            responses.insert(status.to_string(), response_obj);
-        }
-
-        let mut operation_obj = json!({ "responses": responses });
-        let params = path_parameters(&key.route);
-        if !params.is_empty() {
-            operation_obj["parameters"] = Value::Array(params);
-        }
-        if !acc.security_schemes.is_empty() {
-            operation_obj["security"] = Value::Array(
-                acc.security_schemes
-                    .iter()
-                    .map(|name| json!({ name.clone(): [] }))
-                    .collect(),
-            );
-        }
-
+        let operation_obj = operation_object(&key, &acc, warnings);
         let path_item = paths.entry(key.route.clone()).or_insert_with(|| json!({}));
         path_item
             .as_object_mut()
             .expect("path items are always objects")
-            .insert(key.method.clone(), operation_obj);
+            .insert(key.method, operation_obj);
     }
 
     let mut doc = json!({
@@ -153,6 +213,21 @@ pub(crate) fn build_document(exchanges: &[Exchange]) -> Value {
         },
         "paths": paths,
     });
+
+    // §4.6 says the generator warns; §4.3 says it warns which operations fell
+    // below the threshold. Both are carried *in the artifact*, because the
+    // only place a human ever reviews this document is its diff, and stderr
+    // from inside a `#[test]` is swallowed by libtest's output capture —
+    // which is exactly how six live-looking JWTs once shipped with 41
+    // warnings nobody could see. Absent key = a clean run.
+    if !warnings.is_empty() {
+        doc["info"]["x-cyanotype-warnings"] = Value::Array(
+            warnings
+                .iter()
+                .map(|w| Value::String(w.clone()))
+                .collect(),
+        );
+    }
 
     if !security_scheme_defs.is_empty() || !component_schemas.is_empty() {
         let mut components = json!({});
@@ -189,6 +264,10 @@ mod tests {
             body: BodyCapture::Json(body),
         };
         ex
+    }
+
+    fn build_document(exchanges: &[Exchange]) -> Value {
+        super::build_document(exchanges, &mut Vec::new())
     }
 
     #[test]

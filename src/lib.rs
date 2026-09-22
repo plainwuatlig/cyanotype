@@ -140,7 +140,8 @@ impl Collected {
     /// document isn't representable as JSON, or [`CyanotypeError::Write`] if
     /// writing to a given path fails.
     pub fn write_openapi(&self, destination: impl Into<Destination>) -> Result<(), CyanotypeError> {
-        let document = openapi::build_document(&self.exchanges);
+        let mut warnings = store::warnings_snapshot();
+        let document = openapi::build_document(&self.exchanges, &mut warnings);
         let json = serde_json::to_string(&document).map_err(CyanotypeError::Serialize)?;
 
         match destination.into() {
@@ -153,9 +154,15 @@ impl Collected {
         }
     }
 
-    /// Warnings accumulated so far: samples below the inference threshold,
-    /// bodies truncated at the capture cap, undeclared high-entropy strings.
-    /// Never fails a test on its own — surfacing these is the caller's call.
+    /// Warnings accumulated while *recording*: undeclared high-entropy
+    /// strings (§4.6), bodies truncated at the capture cap. Never fails a
+    /// test on its own — surfacing these is the caller's call.
+    ///
+    /// Warnings produced while *assembling* the document (every operation
+    /// below §4.3's sample threshold) are not here: they're computed by
+    /// [`Collected::write_openapi`] and carried in the document itself, at
+    /// `info` → `x-cyanotype-warnings`, so they survive libtest's output
+    /// capture and appear in the artifact's diff.
     pub fn warnings(&self) -> Vec<String> {
         store::warnings_snapshot()
     }

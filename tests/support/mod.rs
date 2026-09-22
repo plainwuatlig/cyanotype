@@ -29,6 +29,7 @@ pub fn build() -> Router {
         .route("/health", get(health))
         .route("/users/:id", get(get_user))
         .route("/users", post(create_user))
+        .route("/session", get(session))
         .route("/whoami", get(whoami))
         .route("/whoami-bearer", get(whoami))
         .route("/whoami-apikey", get(whoami))
@@ -66,6 +67,13 @@ async fn create_user(
         StatusCode::CREATED,
         Json(json!({ "id": id, "name": body.get("name").cloned().unwrap_or(json!(null)) })),
     )
+}
+
+/// Mirrors `uniar-api`'s `/api/v1/sessions/visitors`: a live JWT in a
+/// response body, which §4.6's entropy warning must flag rather than embed
+/// silently.
+async fn session() -> impl IntoResponse {
+    Json(json!({ "data": { "id": 18, "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE4LCJleHAiOjE3OTc4Mzk5MzMsImlzcyI6InVuaWFyIn0.qVh0mYQ9k3sT7pR2wX5cN8dL1fG4jB6hK0aZ3eU7vI4" } }))
 }
 
 /// Echoes back whether an `Authorization` header was sent and, if so, its
