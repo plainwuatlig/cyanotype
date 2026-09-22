@@ -159,15 +159,34 @@ async fn undeclared_high_entropy_warning_appears_in_the_document_itself() {
     assert!(doc.to_string().contains(REAL_JWT));
 }
 
+/// §4.3 requires the generator to warn which operations fell below the sample
+/// threshold — as **one aggregated notice**, not one entry per operation. That
+/// is a size decision with a measurement behind it (see
+/// `below_threshold_notice` in `src/openapi.rs`), so the test pins both halves:
+/// the operations are still named, and they arrive in a single entry that
+/// fails if someone un-aggregates it.
 #[tokio::test]
-async fn an_operation_below_the_sample_threshold_is_named_in_the_document() {
+async fn below_threshold_operations_are_named_in_one_aggregated_notice() {
     let app = support::build();
     support::send(app, "GET", "/health", &[], None).await;
 
     let doc = support::emit();
-    let warnings = doc["info"]["x-cyanotype-warnings"].to_string();
+    let entries: Vec<&str> = doc["info"]["x-cyanotype-warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|w| w.contains("fewer than 2 samples"))
+        .collect();
+
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one aggregated notice, got: {entries:?}"
+    );
     assert!(
-        warnings.contains("GET /health 200") && warnings.contains("below the threshold"),
-        "§4.3 requires the generator to warn about sub-threshold operations: {warnings}"
+        entries[0].contains("GET /health 200"),
+        "the notice must still name the operation it reports on: {}",
+        entries[0]
     );
 }

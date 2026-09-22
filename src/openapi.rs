@@ -63,23 +63,37 @@ fn path_parameters(route: &str) -> Vec<Value> {
 /// recording was in progress (undeclared high-entropy strings, §4.6;
 /// truncated bodies) are the caller's to prepend — see
 /// [`crate::Collected::warnings`].
-/// One operation object, plus every warning its evidence provokes.
+/// One notice listing every operation below §4.3's threshold, rather than one
+/// notice each. Content is unchanged — the notice still names every one of
+/// them, and the per-operation sample count is already on the response as
+/// `x-cyanotype-samples`, so repeating `N` here would be duplication. The
+/// per-operation phrasing cost ~6.8 KB of a 33 KB document (~4k agent
+/// tokens), which is the same doctrine §4.7 applied when it cut TOON for
+/// 14.7%: the artifact is read by agents, and a nag is not worth 4k tokens.
+fn below_threshold_notice(below: &[String]) -> String {
+    format!(
+        "{} (operation, status) pair(s) observed fewer than {MIN_SAMPLES_FOR_REQUIRED} samples — \
+         `required` is not asserted for these: {} (each one's sample count is its response's \
+         `x-cyanotype-samples`)",
+        below.len(),
+        below.join(", ")
+    )
+}
+
+/// One operation object, plus the below-threshold pairs its evidence produced.
 fn operation_object(
     key: &OperationKey,
     acc: &OperationAcc,
-    warnings: &mut Vec<String>,
+    below_threshold: &mut Vec<String>,
 ) -> Value {
     let mut responses = Map::new();
     for (status, status_acc) in &acc.by_status {
         if status_acc.sample_count < MIN_SAMPLES_FOR_REQUIRED {
-            warnings.push(format!(
-                "{} {} {}: only {} sample(s) observed, below the threshold of {} — \
-                 `required` is not asserted; add a test, or declare the type",
+            below_threshold.push(format!(
+                "{} {} {}",
                 key.method.to_ascii_uppercase(),
                 key.route,
-                status,
-                status_acc.sample_count,
-                MIN_SAMPLES_FOR_REQUIRED
+                status
             ));
         }
         // This is a generic, response-object-level description, not the
@@ -195,13 +209,17 @@ pub(crate) fn build_document(exchanges: &[Exchange], warnings: &mut Vec<String>)
     }
 
     let mut paths: Map<String, Value> = Map::new();
+    let mut below_threshold: Vec<String> = Vec::new();
     for (key, acc) in operations {
-        let operation_obj = operation_object(&key, &acc, warnings);
+        let operation_obj = operation_object(&key, &acc, &mut below_threshold);
         let path_item = paths.entry(key.route.clone()).or_insert_with(|| json!({}));
         path_item
             .as_object_mut()
             .expect("path items are always objects")
             .insert(key.method, operation_obj);
+    }
+    if !below_threshold.is_empty() {
+        warnings.push(below_threshold_notice(&below_threshold));
     }
 
     let mut doc = json!({
