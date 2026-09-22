@@ -29,6 +29,53 @@ installs itself via `Router::route_layer`, which only sees requests axum has
 already matched to a route (this is what makes `MatchedPath`, and therefore
 the route template in the output, available at all).
 
+### Where to emit from — and why it has no clean hook
+
+Rust has no "after every test in this binary finished" hook, and §2 of the
+spec is explicit that writing is never bound to test execution. So the second
+call is yours to place, and placing it is the one genuinely awkward step in
+adopting this crate.
+
+A recipe that works today:
+
+```bash
+cargo test -- --test-threads=1   # ordering is the only thing serialism buys
+```
+
+```rust
+// At the *crate root* of your test module tree, not inside one of them.
+#[tokio::test]
+async fn zzzz_emit_openapi() {
+    cyanotype::collected().write_openapi("openapi.json").unwrap();
+}
+```
+
+**The trap, measured.** libtest runs tests in lexicographic order of their
+full path, so a test named `zzz_…` inside a module sorts *before* every later
+module. In the proof run against `uniar-api`, `app::tests::zzz_emit_openapi`
+ran at position 65 of 118 — `users::tests::…` and `v2_content::tests::…` ran
+after it, and whatever they recorded was never emitted. A `zzzz` prefix at the
+crate root sorts after every module name, which is the version that works by
+construction rather than by luck.
+
+Measured impact of the trap in this suite: none. Trapped and untrapped runs
+emit the same 45 operations over the same 38 paths, the same 61 (operation,
+status) pairs, and the same per-pair sample counts — the later modules happen
+to add no operation the earlier ones had not already recorded. That is exactly
+why it survived a full build, and exactly why it is still a trap: it bites when
+a later-sorting test owns a route exclusively, and nothing tells you whether
+yours does.
+
+Alternatives, honestly: accept the fragility and document it (what this crate
+does), or put emission in a small separate binary/xtask your CI runs after
+`cargo test` exits — robust, but a new file, and it can't see this process's
+recorder, so it doesn't actually work. There is no `Drop`/`ctor` guard here:
+emitting on process exit is exactly the hook that silently half-writes when a
+test panics.
+
+**One thing this no longer risks.** Warnings ride in the artifact itself (see
+below), so an emission step whose stderr libtest swallows cannot hide them.
+
 ### Declaring a wire shape inference can't see
 
 Handlers that return `json!({...})` with no backing Rust type are the norm,
@@ -65,8 +112,24 @@ Call this once, before the tests whose bodies contain the field run — it
 isn't part of the one-line recorder installation, it's occasional setup.
 `cyanotype` ships no heuristics for *what* counts as sensitive (a heuristic
 that's 90% right is worse than none, per the spec: it manufactures false
-confidence). It does warn — never fail — on undeclared strings that look
-high-entropy, via `Collected::warnings()`.
+confidence). It does warn — never fail, and never redact on a guess — on
+undeclared strings that look high-entropy.
+
+**Warnings are delivered in the document**, at `info` →
+`x-cyanotype-warnings`; the key is absent on a clean run. They also come back
+from `Collected::warnings()`, but that channel alone is not enough: the
+emission step runs inside a `#[tokio::test]`, and libtest captures and
+discards the stdout and stderr of passing tests. In the first real run, six
+live-looking JWTs were emitted with 41 warnings attached to them and not one
+warning visible anywhere. The artifact's diff is the one place this document
+is actually reviewed, so it is the one place a warning is guaranteed to be
+seen.
+
+Warnings are of two kinds, in the same array: undeclared high-entropy strings
+(§4.6, e.g. `response POST /vue-api/v1/login data.token`), and every
+operation that fell below §4.3's sample threshold, which is where the
+`required` you didn't get is explained. On the measured `uniar-api` run that
+second kind is 50 of 61 operations — loud, and true.
 
 ## What's guaranteed regardless of configuration
 
@@ -74,6 +137,9 @@ high-entropy, via `Collected::warnings()`.
   under any configuration. It's stripped at the point headers are first
   captured (`src/auth.rs`), before an in-memory exchange even exists —
   there's no downstream code path that could leak it by accident.
+- Every undeclared high-entropy string and every sub-threshold operation is
+  named in the emitted document at `info` → `x-cyanotype-warnings`; absent
+  key means a clean run. `cyanotype` never redacts on a guess (§4.6).
 - A body whose content-type isn't JSON (or `+json`) is never embedded in the
   document — only its content-type and length are recorded.
 - Nothing this crate does can reach a production build; it's meant to live
@@ -95,94 +161,68 @@ Per `spec.md` §5, two numbers are published here rather than assumed.
 ### Adoption cost
 
 The acceptance target is `uniar-api-rs`
-(`~/Projects/backend/uniar/rust/uniar-api`), per the spec, which was **read
-to understand its test-helper shape and not modified**, per this task's own
-instruction — those two constraints (§5 wants it literally run against that
-repo; the task forbids touching that repo) are in direct tension, and the
-resolution taken here is the one the task itself allows: an equivalent
-fixture in `tests/support/mod.rs`, plus a direct, line-by-line reading of the
-real file for the numbers below.
+(`~/Projects/backend/uniar/rust/uniar-api`), per the spec — and it has now
+been **literally run against it**, on the unpushed branch
+`experiment/cyanotype` in that repo: 117 tests pass, 1 fails pre-existing
+(`image_version_missing` expects 404 where the endpoint returns 200;
+`cyanotype` added no failures), and the recorder emitted a 33 KB document
+covering 45 operations across 38 paths.
 
-`uniar-api/src/app.rs`'s test helper is, verbatim (read 2026-09-22):
-
-```rust
-pub fn build(cfg: Config, pools: Pools) -> Router {
-    routes::router(cfg, pools)
-}
-```
-
-Every one of that file's 40 `#[tokio::test]` functions calls `build(...)`
-fresh rather than sharing one instance (measured: `grep -c '#\[tokio::test\]'`;
-70 total across the whole crate, 30 of them not touching HTTP at all), and 58
-of those 40 tests' calls reach `.oneshot(...)` (measured: `grep -c
-'\.oneshot('`) — close to the spec's own cited "~60". Adopting `cyanotype`
-for recording is:
+The claim was one line. The measured cost is **three**, and the difference is
+the shape of `uniar-api` rather than anything about this crate:
 
 ```diff
  pub fn build(cfg: Config, pools: Pools) -> Router {
 -    routes::router(cfg, pools)
-+    cyanotype::record(routes::router(cfg, pools))
++    let router = routes::router(cfg, pools);
++    #[cfg(test)]
++    let router = cyanotype::record(router);
++    router
  }
 ```
 
-**One line changed, zero added, zero removed** — verified mechanically, not
-just asserted, in `tests/adoption.rs`. Every one of the 58 `oneshot` call
-sites is untouched, because they all go through this one function. This
-matches the spec's claim exactly, for the recording half of the API.
+`build()` is production code, called inline by ~40 test functions with no
+test-only helper to wrap, so the recorder has to be gated behind
+`#[cfg(test)]` rather than installed unconditionally: one line changed, three
+added. Plus one line under `[dev-dependencies]`. Every one of the 58 `oneshot`
+call sites is untouched, because they all route through this one function.
 
-What that number doesn't include, because the spec's own "one line" claim is
-scoped to §3 (recording) and doesn't cover this: `Cargo.toml` needs
-`cyanotype` under `[dev-dependencies]` (+1 line, never reaching the
-production build), and *emission* has no one-line answer at all. Rust has no
-built-in "after all tests in this binary finished" hook, so
-`cyanotype::collected().write_openapi(...)` has to run from somewhere —
-a dedicated `#[test]` relying on `--test-threads=1` for ordering (a few
-lines, fragile), or a small separate binary/xtask run by CI after `cargo
-test` exits (robust, but a new file). This is a real gap, named in
-`DESIGN.md`, not a `cyanotype` defect — §2 of the spec is explicit that
-writing is never bound to test execution — but reporting "one line" without
-it would only be reporting the easy half.
+The earlier one-line figure was measured against `ls-api-rs`, whose test helper
+has a different shape and can take the wrapper directly. Both numbers are
+honest; only one of them is about the repo the spec chose.
 
 For clawspec's yardstick (463 lines of scaffolding for 5 paths / 9
 operations): this crate's recording-side cost doesn't scale with route or
-operation count at all (it's one wrapper around the router, regardless of
-how many routes it contains), which is the entire bet §6 describes — inferred
-templates instead of declared ones.
+operation count at all (one wrapper around the router, whatever it contains),
+which is the entire bet §6 describes. Emission is not one line — see "Where to
+emit from" above.
 
 ### The N-distribution
 
-Running the real recorder against `uniar-api`'s actual suite wasn't possible
-without modifying that repo (forbidden by this task), so this number is a
-**static proxy**, not the live figure — reported as such, not dressed up as
-the real thing. Tallying every literal path string referenced in
-`uniar-api/src/app.rs`'s tests (`grep -oE '"/[a-zA-Z0-9_/{}:.-]*"' | sort |
-uniq -c`) found 46 distinct literal paths:
+Measured, from the real run — this figure existed nowhere before, and it is the
+number §4.3 was designed against. Across 61 (path, method, status) triples in
+45 operations over 38 paths:
 
-| times referenced | distinct literal paths |
+| samples | (operation, status) triples |
 |---|---|
-| 1 | 31 (67%) |
+| 1 | 50 (82%) |
 | 2 | 7 |
-| 3 | 5 |
-| 4 | 2 |
-| 8 | 1 (`/api/v1/account`) |
+| 3 | 2 |
+| 4 | 1 |
+| 5 | 1 |
 
-This undercounts the true operation-level N in both directions at once: it's
-too low where several concrete literal paths collapse onto one route
-template at runtime (`/vue-api/v1/rewards/99999999` and
-`/vue-api/v1/rewards/{id}` are two rows above but one operation to a live
-recorder), and it's too high where the same literal path appears with
-different query strings that a route template doesn't distinguish. Even so,
-the qualitative shape is unlikely to be an artifact of the proxy: a clear
-majority (67%) of the routes this suite touches are hit by only one literal
-test call. Reading why matters more than the count — `app.rs`'s
-`production_live_routes_match_rails_auth_contract` test alone hits 10 routes
-in a single function purely to assert a 401 auth-boundary shape, contributing
-nothing to any of those routes' *happy-path* sample count. Under §4.3's
-`required`-at-N≥2 rule, that means a large fraction of `uniar-api`'s emitted
-operations would carry **no `required` array at all** and would surface in
-`cyanotype`'s own below-threshold warning — which is exactly the outcome
-§4.3 designed for (silence over a false assertion), not a defect in this
-measurement.
+**82% of what this suite exercises is observed exactly once**, so §4.3's
+`required`-at-N≥2 rule leaves most emitted operations with no `required` array
+at all — and now says so in `x-cyanotype-warnings` rather than staying silent
+about why. That is the outcome §4.3 designed for (silence over a false
+assertion), confirmed on real data rather than assumed.
+
+Reading why matters as much as the count: `app.rs`'s
+`production_live_routes_match_rails_auth_contract` test alone hits 10 routes in
+a single function purely to assert a 401 auth-boundary shape, contributing
+nothing to any of those routes' happy-path sample count. A suite that asserts a
+boundary shape is not a suite that exercises a contract, and this distribution
+is what makes that visible.
 
 ## Limitations, stated rather than discovered
 
@@ -234,7 +274,7 @@ measurement.
 
 MSRV: latest stable minus two (1.93 → 1.91 as of 2026-09-22), tracked in
 `Cargo.toml`'s `rust-version` and verified: the full test suite (`cargo
-test`, all 60 tests including doctests) passes unmodified under `rustup run
+test`, all 66 tests including doctests) passes unmodified under `rustup run
 1.91.0 cargo test`.
 
 Licensed under either of `MIT` or `Apache-2.0`, at your option.
