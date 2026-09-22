@@ -2,11 +2,12 @@
 
 `spec.md` (§4.2 and §3) deliberately leaves two shapes unspecified because they
 are the API surface and the hardest engineering, respectively. Both decisions
-below are **agent decisions pending human review** — flagged per the task
-brief, not blocking on it. If Plain wants a different shape for either, both
-are isolated (one API in `declare.rs`/`receipt` on the `lib.rs` surface, one
-internal type in `body.rs`) and can be swapped without touching the rest of
-the crate.
+below were **reviewed and ratified by Plain on 2026-09-22** ("do those you
+mentioned" — a blanket ratification of the agent decisions flagged here, after
+both were read back to him with the rejected alternatives). They stand as
+built; nothing below is pending. Each remains isolated if that ever changes:
+one API in `declare.rs`/`receipt` on the `lib.rs` surface, one internal type in
+`body.rs`, swappable without touching the rest of the crate.
 
 ---
 
@@ -48,7 +49,7 @@ the response body for capture (`layer.rs`). `receipt.declare_response::<T>`:
 ### Why this shape and not the alternatives
 
 - **Why a struct + `schemars`, not a hand-rolled schema fn.** Plain's ruling
-  (ticket 08) was "we should WRITE the def for them" — a Rust struct *is*
+  (the ruling on declarations) was "we should WRITE the def for them" — a Rust struct *is*
   that definition, and it is a Rust struct anyway: it's what `serde`
   deserialization needs to validate against. Piggybacking `schemars::JsonSchema`
   derive on the same struct is one derive, not a second artifact. Rejected:
@@ -146,7 +147,7 @@ Both the request body (before it reaches the handler) and the response body
   rejected because it inverts the spec's own framing: it *does* buffer the
   whole body before the handler ever sees a byte, which (a) defeats
   streaming for any handler that starts responding before the request
-  body finishes (none in `uniar-api` today, but the layer shouldn't assume
+  body finishes (none in the first consumer today, but the layer shouldn't assume
   that forever), and (b) forces a size limit that, if exceeded, must
   either reject the request (changing the behavior of the app under test —
   a `cyanotype`-instrumented test suite must not 413 requests an
@@ -165,7 +166,7 @@ Both the request body (before it reaches the handler) and the response body
 - **Why 64 KiB and not configurable.** The spec makes exactly two things
   configurable — the inference sample threshold (§4.3) and (implicitly)
   the redaction entropy threshold (§4.6) — and is silent on this one.
-  64 KiB comfortably covers every JSON body in `uniar-api`'s test corpus
+  64 KiB comfortably covers every JSON body in the first consumer's test corpus
   (checked by inspection of `src/**/*.rs` fixtures: the largest literal
   JSON body order tens of routes construct is low single-digit KiB) while
   keeping a full test run's aggregate memory bounded regardless of sample
@@ -205,7 +206,8 @@ produced them — read a handler function's doc comment while a test is running.
 
 - **An overlay** — a separate place the author writes each operation's
   description, keyed by method+route. This is exactly what §4.4 argued against
-  by name ("There is no overlay... Ticket 07's overlay... died with AXI") and
+  by name — *"There is no overlay"* — the overlay having been considered and
+  rejected during design — and
   would reintroduce the drift problem doc comments were chosen to avoid.
   Rejected on the spec's own stated reasoning, not a new judgement.
 - **A companion attribute proc-macro** (e.g. `#[cyanotype::documented(method

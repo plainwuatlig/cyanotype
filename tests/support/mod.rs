@@ -1,6 +1,6 @@
-//! A fixture axum app, wired the way `uniar-api`'s tests wire theirs: one
+//! A fixture axum app, wired the way the first consumer's tests wire theirs: one
 //! `build()` function returning a `Router` that a test drives with
-//! `tower::ServiceExt::oneshot`. See `uniar-api/src/app.rs` (read, not
+//! `tower::ServiceExt::oneshot`. See that service's test helper (read, not
 //! modified, per the task) for the pattern this mirrors.
 //!
 //! `cyanotype::record()` wraps the router inside `build()` — this is the
@@ -69,7 +69,7 @@ async fn create_user(
     )
 }
 
-/// Mirrors `uniar-api`'s `/api/v1/sessions/visitors`: a live JWT in a
+/// Mirrors the first consumer's visitor-session endpoint: a live JWT in a
 /// response body, which §4.6's entropy warning must flag rather than embed
 /// silently.
 async fn session() -> impl IntoResponse {
@@ -105,7 +105,7 @@ async fn big_body() -> impl IntoResponse {
 }
 
 /// Drive one request through `app` via `oneshot`, the same way
-/// `uniar-api`'s own test helper does, and collect the response.
+/// the first consumer's own test helper does, and collect the response.
 pub async fn send(
     app: Router,
     method: &str,

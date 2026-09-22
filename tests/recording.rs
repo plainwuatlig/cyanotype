@@ -1,5 +1,5 @@
 //! Seam under test: `cyanotype::record(router)` -> drive requests with
-//! `oneshot` (mirroring `uniar-api`'s own test helper) -> `collected().write_openapi()`
+//! `oneshot` (mirroring the first consumer's own test helper) -> `collected().write_openapi()`
 //! -> the emitted `openapi.json`. This is the seam a real caller uses, so
 //! it's the one these tests assert against, rather than any internal type.
 
