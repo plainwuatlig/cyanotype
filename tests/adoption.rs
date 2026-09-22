@@ -1,18 +1,14 @@
 //! §5's acceptance measurement: adoption cost in lines actually changed.
 //!
-//! What this file can and can't do, stated plainly: the task instructs
-//! reading `uniar-api` to understand its test-helper shape but **not
-//! modifying that repo**, and separately §5 of the spec wants "`uniar-api`'s
-//! existing tests run with the recorder installed, changing one line in its
-//! test helper" — literally run against the real repo. Those two
-//! instructions conflict; per the delegating instructions, the resolution
-//! is to build an equivalent fixture here and report the real repo's numbers
-//! by inspection instead of by execution. That's what this file does, and
-//! it's the reason this measurement is partly "read the real file and count"
-//! rather than entirely "run it and see."
+//! The earlier version of this file measured by inspection, because the task
+//! forbade modifying `uniar-api` while §5 asked for the recorder to be run
+//! against it. That tension is gone: the recorder **has** been run against
+//! `uniar-api`'s real suite, on the unpushed branch `experiment/cyanotype`
+//! in that repo (117 passed, 1 pre-existing failure, 45 operations over 38
+//! paths). What follows is the change that run actually made, not the change
+//! it was predicted to make.
 //!
-//! `uniar-api/src/app.rs` (read 2026-09-22, not modified) contains exactly
-//! this as its test helper's router construction:
+//! `uniar-api/src/app.rs` before (read 2026-09-22):
 //!
 //! ```text
 //! pub fn build(cfg: Config, pools: Pools) -> Router {
@@ -20,93 +16,167 @@
 //! }
 //! ```
 //!
-//! `uniar-api::app::tests` calls `build(cfg, pools)` fresh in every one of
-//! its 40 `#[tokio::test]` functions (measured: `grep -c '#\[tokio::test\]'
-//! src/app.rs`; 70 total across the whole crate, the other 30 not exercising
-//! HTTP at all) rather than sharing one instance, and 58 of those calls
-//! reach `.oneshot(...)` (measured: `grep -c '\.oneshot(' src/app.rs`,
-//! matching the spec's own "~60" almost exactly). Wrapping the single
-//! `build()` definition — not each call site — is what the spec's "one line
-//! in a test helper" claim rests on. The test below reproduces that exact
-//! before/after and proves it mechanically: exactly one line changed, none
-//! added, none removed.
+//! The prediction was `cyanotype::record(routes::router(cfg, pools))` — one
+//! line replaced, same line count. It does not survive contact with the repo:
+//! `build()` is production code, called inline by ~40 `#[tokio::test]`
+//! functions (70 across the crate, 30 of which never touch HTTP) with no
+//! test-only helper to wrap, so an unconditional `record()` would put the
+//! recorder in the production build. It needs a `#[cfg(test)]` gate, which
+//! costs three more lines:
 //!
-//! One number in the spec's own framing didn't hold up under a direct
-//! count: `src/http/routes.rs` has 76 `.route(...)` registrations, not the
-//! "35 routes" §5 cites (ticket provenance for that figure wasn't re-read,
-//! per the instruction to trust the spec over the tickets) — some of that
-//! gap is routes registered more than once under different API version
-//! prefixes (`/api/v1/...` and `/api/v2/...` for the same handler) and
-//! method-only variations, but 76 vs. 35 is more than that alone plausibly
-//! explains. Reported here rather than quietly adopted, since the acceptance
-//! section is asking for measured numbers, not repeated ones.
+//! ```text
+//! pub fn build(cfg: Config, pools: Pools) -> Router {
+//!     let router = routes::router(cfg, pools);
+//!     #[cfg(test)]
+//!     let router = cyanotype::record(router);
+//!     router
+//! }
+//! ```
+//!
+//! The earlier one-line figure was measured against `ls-api-rs`, whose test
+//! helper has a different shape and *can* take the wrapper directly. Both
+//! numbers are honest; only one of them is about the repo §5 chose.
+//!
+//! The 58 `.oneshot(...)` call sites are untouched either way, because they
+//! all route through this one function — which is what §3's "one line in a
+//! test helper" budget rests on.
+//!
+//! One number in the spec's own framing didn't hold up under a direct count:
+//! `src/http/routes.rs` has 76 `.route(...)` registrations, not the "35
+//! routes" §5 cites (ticket provenance for that figure wasn't re-read, per
+//! the instruction to trust the spec over the tickets) — some of that gap is
+//! routes registered more than once under different API version prefixes
+//! (`/api/v1/...` and `/api/v2/...` for the same handler) and method-only
+//! variations, but 76 vs. 35 is more than that alone plausibly explains.
+//! Reported here rather than quietly adopted.
 
-#[test]
-fn wrapping_the_shared_build_helper_changes_exactly_one_line() {
-    // Reproduced verbatim from `uniar-api/src/app.rs` lines 6-8, read
-    // 2026-09-22. Not a paraphrase: this is the literal text of the
-    // function every one of that file's `#[tokio::test]`s calls.
-    let before = "\
+/// The recording half of the change, reproduced verbatim from what the proof
+/// branch actually contains (not a paraphrase).
+const BEFORE: &str = "\
 pub fn build(cfg: Config, pools: Pools) -> Router {
     routes::router(cfg, pools)
 }";
 
-    // The only change the spec's "one line" claim requires: wrap the
-    // returned router. Every call site (all ~70 tests) is untouched,
-    // because they all go through this one function.
-    let after = "\
+const AFTER: &str = "\
 pub fn build(cfg: Config, pools: Pools) -> Router {
-    cyanotype::record(routes::router(cfg, pools))
+    let router = routes::router(cfg, pools);
+    #[cfg(test)]
+    let router = cyanotype::record(router);
+    router
 }";
 
-    let before_lines: Vec<&str> = before.lines().collect();
-    let after_lines: Vec<&str> = after.lines().collect();
+/// §4.6's declaration is *additional* setup, not part of the recording cost —
+/// but it is not optional in a service that returns a token, and the proof run
+/// needed it: the recorder's own warning named `response POST
+/// /vue-api/v1/login data.token`, and the author's half of §4.6 is the
+/// decision. Repos with nothing to redact stop at [`AFTER`].
+const AFTER_WITH_DECLARED_REDACTION: &str = "\
+pub fn build(cfg: Config, pools: Pools) -> Router {
+    let router = routes::router(cfg, pools);
+    #[cfg(test)]
+    let router = {
+        static REDACTIONS: std::sync::Once = std::sync::Once::new();
+        REDACTIONS.call_once(|| {
+            cyanotype::configure(cyanotype::Redactions::new().field(\"token\"));
+        });
+        cyanotype::record(router)
+    };
+    router
+}";
 
-    assert_eq!(
-        before_lines.len(),
-        after_lines.len(),
-        "the change must not add or remove any lines"
-    );
+fn lines(s: &str) -> Vec<&str> {
+    s.lines().collect()
+}
 
-    let changed: Vec<usize> = before_lines
+/// Lines present in `after` that were not present in `before` — the additions.
+fn added<'a>(before: &[&'a str], after: &[&'a str]) -> Vec<&'a str> {
+    after
         .iter()
-        .zip(after_lines.iter())
-        .enumerate()
-        .filter_map(|(i, (b, a))| (b != a).then_some(i))
-        .collect();
+        .filter(|line| !before.contains(line))
+        .copied()
+        .collect()
+}
+
+/// Lines present in `before` that are gone from `after` — the removals.
+fn removed<'a>(before: &[&'a str], after: &[&'a str]) -> Vec<&'a str> {
+    before
+        .iter()
+        .filter(|line| !after.contains(line))
+        .copied()
+        .collect()
+}
+
+#[test]
+fn recording_costs_one_line_changed_and_three_added() {
+    let before = lines(BEFORE);
+    let after = lines(AFTER);
 
     assert_eq!(
-        changed,
-        vec![1],
-        "exactly one line (the router-construction line) should differ"
+        added(&before, &after),
+        vec![
+            "    let router = routes::router(cfg, pools);",
+            "    #[cfg(test)]",
+            "    let router = cyanotype::record(router);",
+            "    router",
+        ],
+        "one line is rewritten in place, and the `#[cfg(test)]` gate, the wrapper \
+         and the rebound return are added on top of it"
+    );
+    assert_eq!(
+        removed(&before, &after),
+        vec!["    routes::router(cfg, pools)"],
+        "exactly one line is replaced: the router construction"
+    );
+    assert_eq!(
+        after.len() - before.len(),
+        3,
+        "four additions minus one replacement is a net +3, not the predicted +0"
     );
 }
 
-/// The cost the spec's "one line" claim explicitly does *not* cover, made
-/// concrete rather than left as a footnote: getting the recorder into the
-/// build in the first place, and getting the document out at the end.
+#[test]
+fn declaring_a_redacted_field_is_seven_more_lines_and_is_not_optional_here() {
+    let recording = lines(AFTER);
+    let with_redaction = lines(AFTER_WITH_DECLARED_REDACTION);
+
+    assert_eq!(
+        added(&recording, &with_redaction).len(),
+        7,
+        "the §4.6 declaration block is six lines, plus the plain `record` line \
+         restructured into it"
+    );
+    assert_eq!(
+        removed(&recording, &with_redaction),
+        vec!["    let router = cyanotype::record(router);"],
+        "declaring a redaction subsumes the plain `record` call; nothing else moves"
+    );
+    assert_eq!(
+        with_redaction.len() - recording.len(),
+        6,
+        "net +6 lines for the declaration block"
+    );
+}
+
+/// The cost §3's "one line" claim explicitly does *not* cover, made concrete:
+/// getting the document out at the end.
 ///
-/// - `Cargo.toml`: **+1 line** — `cyanotype` added under `[dev-dependencies]`.
-///   Never reaches `uniar-api`'s production build (it isn't a dependency,
-///   only a dev-dependency), which is the crate's one hard constraint on
+/// - `Cargo.toml`: **+1 line** — `cyanotype` under `[dev-dependencies]`. Never
+///   reaches the production build, which is the crate's one hard constraint on
 ///   this cost.
-/// - Emission: **not one line, and not in the test helper** — `write_openapi`
-///   has to run *after* the test binary's tests have all executed, and Rust
-///   has no built-in "after all tests" hook (see `DESIGN.md` — this exact
-///   gap is called out there as a known limitation, not solved by this
-///   crate). The realistic options, in increasing order of the caller's own
-///   effort: a `#[test]` at the end of the file relying on `cargo test
-///   --test-threads=1` for ordering (fragile, ~3 lines, no new files); a
-///   tiny separate `#[test]`-free binary/xtask that links the lib and calls
-///   `cyanotype::collected().write_openapi(...)` after `cargo test` exits in
-///   CI (robust, but a new file plus a CI step, not "one line" by any
-///   count). Neither is a `cyanotype` limitation to fix — §2 of the spec is
-///   explicit that writing is never bound to test execution — but reporting
-///   the "one line" number without this would be reporting only the easy
-///   half.
+/// - Emission: **not one line, and not in the test helper.** Rust has no
+///   built-in "after all tests in this binary finished" hook, and §2 is
+///   explicit that writing is never bound to test execution, so emission
+///   cannot be a framework callback. The recipe that works is a `#[test]` at
+///   the *crate root* named to sort after every module, run under `cargo test
+///   -- --test-threads=1`. The proof run used `app::tests::zzz_emit_openapi`
+///   first and it ran at position 65 of 118 — libtest sorts by full test path,
+///   so a name inside a module is not last in the binary. Measured impact in
+///   that suite: none (trapped and untrapped runs emitted the same document),
+///   which is exactly why it survived a full build and exactly why it is still
+///   a trap. See README, "Where to emit from".
 #[test]
 fn emission_cost_is_named_here_because_the_one_line_claim_does_not_include_it() {
-    // No assertion beyond compiling: this test's only job is to be the
-    // place this measurement's honesty check lives, so it can't silently
-    // rot out of the doc comment above.
+    // No assertion beyond compiling: this test's only job is to be the place
+    // this measurement's honesty check lives, so it cannot silently rot out of
+    // the doc comment above.
 }
