@@ -137,7 +137,12 @@ pub(crate) fn warn_undeclared_high_entropy(value: &Value, context: &str) {
 
 fn scan(value: &Value, context: &str, path: &mut String) {
     match value {
-        Value::String(s) if looks_high_entropy(s) => {
+        // `redact_value` runs first, so a declared field is already the marker
+        // by the time we get here — and the marker is 20 high-entropy-ish
+        // characters, i.e. exactly the shape this scan is looking for. Skip it
+        // explicitly, or every correctly-redacted field reports itself as an
+        // undeclared one.
+        Value::String(s) if s != REDACTED_VALUE && looks_high_entropy(s) => {
             let location = if path.is_empty() {
                 "body".to_string()
             } else {
@@ -204,5 +209,31 @@ mod tests {
     #[test]
     fn short_strings_never_warn_regardless_of_entropy() {
         assert!(!looks_high_entropy("aK9$m"));
+    }
+
+    #[test]
+    fn the_redaction_marker_never_warns_about_itself() {
+        // The marker is exactly MIN_LENGTH characters and clears the entropy
+        // floor, so a scan that didn't exclude it would report every field it
+        // had just successfully redacted.
+        assert!(looks_high_entropy(REDACTED_VALUE));
+
+        let mut value = json!({ "token": REDACTED_VALUE });
+        warn_undeclared_high_entropy(&value, "response GET /session");
+        let warned = crate::store::warnings_snapshot()
+            .iter()
+            .any(|w| w.contains("GET /session"));
+        assert!(!warned, "a redacted field must not warn about its own marker");
+
+        // And an undeclared sibling still does warn, so the guard above is not
+        // silencing the scan wholesale.
+        value["other"] = json!("aK9$mQ2x!pL7@rT4&wZ1--undeclared-and-long");
+        warn_undeclared_high_entropy(&value, "response GET /second");
+        assert!(
+            crate::store::warnings_snapshot()
+                .iter()
+                .any(|w| w.contains("GET /second")),
+            "an undeclared high-entropy field must still warn"
+        );
     }
 }
