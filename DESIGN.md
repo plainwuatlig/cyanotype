@@ -179,3 +179,57 @@ idiom that asserts on a body (which is the only reason to write the test)
 drains it, so this is not expected to bite in practice, but it is a real gap
 versus a fully defensive implementation and is called out here rather than
 silently accepted.
+
+---
+
+## 3. §4.4 (descriptions) is not implemented — found by review, not by the
+   original build, and recorded here for exactly that reason
+
+Independent code review (`code-review` skill, spec axis) caught that §4.4
+("Prose lives as handler doc comments... They are code, reviewed with the
+code, cannot drift from what they describe") has no implementation at all,
+and that this had gone undisclosed in both DESIGN.md and the README's own
+Limitations list — a silent drop, not a stated cut. This section exists to
+close that gap in disclosure, and to explain why it's a cut rather than a
+bug.
+
+**The obstacle is structural, not effort.** A Rust `///` doc comment
+compiles to a `#[doc = "..."]` attribute, which is only visible at
+*compile time*, to a macro applied to the item that carries it. There is no
+runtime API that lets `cyanotype`'s recorder — which only ever sees
+`http::Request`/`http::Response` values crossing a `tower::Layer`, with no
+knowledge of which Rust function produced them — read a handler function's
+doc comment while a test is running.
+
+**Two ways to bridge that gap, both rejected for v1:**
+
+- **An overlay** — a separate place the author writes each operation's
+  description, keyed by method+route. This is exactly what §4.4 argues
+  against by name ("There is no overlay... Ticket 07's overlay... died with
+  AXI") and would reintroduce the drift problem doc comments were chosen to
+  avoid. Rejected on the spec's own stated reasoning, not a new judgement.
+- **A companion attribute proc-macro** (e.g. `#[cyanotype::documented(method
+  = "GET", route = "/users/{id}")]` above each handler fn), which captures
+  the fn's `#[doc]` attribute at compile time and registers `(method, route)
+  -> description` into a static table the recorder can consult at request
+  time. This is the technically correct fix and doesn't reintroduce an
+  overlay (the prose still lives in the doc comment) — but it requires
+  annotating *every documented handler* with its own route redundantly
+  (the macro can't see what `.route(...)` call will attach the fn to,
+  since that happens later, elsewhere), which is real per-handler ceremony
+  running directly against §3's one-line adoption budget being "the
+  product's single differentiator." It also means a second crate
+  (`cyanotype` isn't itself a proc-macro crate) — defensible as a companion
+  the way `serde`/`serde_derive` split, but a larger surface than this
+  build's time budget covers.
+
+**Decision: cut for v1, not attempted.** Given the choice between an overlay
+the spec explicitly rejects and a proc-macro crate whose per-handler
+annotation cost undermines the adoption claim this whole crate is built to
+prove, neither was worth building speculatively within this task's scope.
+Flagged here, in the README's Limitations list, and in a code comment at the
+one place (`src/openapi.rs`) where a reader might otherwise mistake the
+generic per-status `"description"` field for operation-level documentation —
+it isn't; it's a fixed placeholder ("Observed 200 response."), unrelated to
+§4.4. This is a real, disclosed gap in spec coverage, not a design decision
+Plain has ruled on — it should be treated as open, not settled.
