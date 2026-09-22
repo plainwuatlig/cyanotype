@@ -30,6 +30,14 @@ struct StatusAcc {
 struct OperationAcc {
     by_status: BTreeMap<u16, StatusAcc>,
     security_schemes: BTreeSet<String>,
+    /// Every request observed at this operation, whatever its body looked
+    /// like — the denominator for deciding whether a request body is
+    /// mandatory.
+    requests_observed: usize,
+    /// JSON request bodies captured for this operation (§3). Consolidated
+    /// across statuses, because a request body belongs to the operation, not
+    /// to one of its responses.
+    request_samples: Vec<serde_json::Value>,
 }
 
 /// `{name}` segments in a route template become OpenAPI `parameters`
@@ -97,6 +105,28 @@ fn operation_object(
 
     let mut operation_obj = json!({ "responses": responses });
 
+    // §3: request bodies are recorded, so they are documented. Only JSON
+    // bodies were ever retained (`DESIGN.md` §2), so `application/json` is
+    // the only media type we can honestly claim.
+    if !acc.request_samples.is_empty() {
+        let mut request_body = json!({
+            "content": {
+                "application/json": {
+                    "schema": infer_schema(&acc.request_samples),
+                }
+            },
+            "x-cyanotype-samples": acc.request_samples.len(),
+        });
+        // `required` follows §4.3's rule for the response side: asserted only
+        // from N >= 2, and only when *every* observed request carried one.
+        if acc.requests_observed >= MIN_SAMPLES_FOR_REQUIRED
+            && acc.request_samples.len() == acc.requests_observed
+        {
+            request_body["required"] = Value::Bool(true);
+        }
+        operation_obj["requestBody"] = request_body;
+    }
+
     let params = path_parameters(&key.route);
     if !params.is_empty() {
         operation_obj["parameters"] = Value::Array(params);
@@ -131,6 +161,11 @@ pub(crate) fn build_document(exchanges: &[Exchange], warnings: &mut Vec<String>)
             method: exchange.method.as_str().to_ascii_lowercase(),
         };
         let acc = operations.entry(key).or_default();
+        acc.requests_observed += 1;
+        if let BodyCapture::Json(value) = &exchange.request.body {
+            acc.request_samples.push(value.clone());
+        }
+
         let status_acc = acc.by_status.entry(status).or_default();
         status_acc.sample_count += 1;
 
