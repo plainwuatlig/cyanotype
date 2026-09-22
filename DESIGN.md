@@ -2,11 +2,12 @@
 
 `spec.md` (§4.2 and §3) deliberately leaves two shapes unspecified because they
 are the API surface and the hardest engineering, respectively. Both decisions
-below are **agent decisions pending human review** — flagged per the task
-brief, not blocking on it. If Plain wants a different shape for either, both
-are isolated (one API in `declare.rs`/`receipt` on the `lib.rs` surface, one
-internal type in `body.rs`) and can be swapped without touching the rest of
-the crate.
+below were **reviewed and ratified by Plain on 2026-09-22** ("do those you
+mentioned" — a blanket ratification of the agent decisions flagged here, after
+both were read back to him with the rejected alternatives). They stand as
+built; nothing below is pending. Each remains isolated if that ever changes:
+one API in `declare.rs`/`receipt` on the `lib.rs` surface, one internal type in
+`body.rs`, swappable without touching the rest of the crate.
 
 ---
 

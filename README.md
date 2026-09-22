@@ -125,11 +125,18 @@ warning visible anywhere. The artifact's diff is the one place this document
 is actually reviewed, so it is the one place a warning is guaranteed to be
 seen.
 
-Warnings are of two kinds, in the same array: undeclared high-entropy strings
-(§4.6, e.g. `response POST /vue-api/v1/login data.token`), and every
-operation that fell below §4.3's sample threshold, which is where the
-`required` you didn't get is explained. On the measured `uniar-api` run that
-second kind is 50 of 61 operations — loud, and true.
+Warnings are of two kinds, in the same array, and they arrive differently
+because they cost differently:
+
+- **Undeclared high-entropy strings** (§4.6) — one entry each, naming the site
+  (`response POST /vue-api/v1/login data.token`). Security, so it stays
+  impossible to miss.
+- **Every operation below §4.3's sample threshold** — **one aggregated notice**
+  naming all of them, not one entry per operation. On the measured `uniar-api`
+  run that is all 50 of the 61 (operation, status) pairs, and phrasing them
+  individually cost ~6.8 KB of a 33 KB document — roughly 4k agent tokens. The
+  notice repeats no sample counts: each response already carries its own
+  `x-cyanotype-samples`.
 
 ## What's guaranteed regardless of configuration
 
@@ -162,10 +169,10 @@ Per `spec.md` §5, two numbers are published here rather than assumed.
 
 The acceptance target is `uniar-api-rs`
 (`~/Projects/backend/uniar/rust/uniar-api`), per the spec — and it has now
-been **literally run against it**, on the unpushed branch
-`experiment/cyanotype` in that repo: 117 tests pass, 1 fails pre-existing
-(`image_version_missing` expects 404 where the endpoint returns 200;
-`cyanotype` added no failures), and the recorder emitted a 33 KB document
+been **literally run against it** — on the branch `experiment/cyanotype` in
+that repo, since merged to its `main` as `285c461`: 117 tests pass, 1 fails
+pre-existing (`image_version_missing` expects 404 where the endpoint returns
+200; `cyanotype` added no failures), and the recorder emitted a 33 KB document
 covering 45 operations across 38 paths.
 
 The claim was one line. The measured cost is **three**, and the difference is
@@ -242,9 +249,10 @@ is what makes that visible.
   body is recorded as content-type and length and nothing else (`DESIGN.md`
   §2), so the operation gets no `requestBody` at all — the document says
   nothing rather than guessing a media type it never retained.
-- §4.3's sample threshold is a constant (`MIN_SAMPLES_FOR_REQUIRED`), not a
-  configuration API. The spec says "default 2", implying a knob; there is no
-  `configure`-style surface for it in v1.
+- §4.3's sample threshold is a constant (`MIN_SAMPLES_FOR_REQUIRED` = 2), not a
+  configuration API. That is now the **design**, not a gap: the spec's earlier
+  "default 2" wording implied a knob, the word has been struck, and no
+  `configure`-style surface ships until a real caller needs one.
 - Only the `Authorization` header is treated as a candidate auth header —
   a custom header like `X-Api-Key` is never detected or stripped. If a
   service authenticates that way, its key would need to be caught by the
