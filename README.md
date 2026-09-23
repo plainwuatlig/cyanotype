@@ -7,8 +7,8 @@ emit `openapi.json` whenever you choose.
 
 The document isn't a claim of completeness. It's an impression of what the
 tests actually touched — derived, not written. A contact print, not a
-drawing. See `DESIGN.md` for the two decisions the design brief deliberately
-left open, and the rejected alternatives behind each.
+drawing. See `SPEC.md` for the full design specification this crate is built
+against, and `DESIGN.md` for the two decisions that specification left open.
 
 ## Usage
 
@@ -153,7 +153,7 @@ because they cost differently:
 
 ## The two decisions the spec left open
 
-`spec.md` §4.2 (test-side declaration syntax) and §3 (body capture under
+`SPEC.md` §4.2 (test-side declaration syntax) and §3 (body capture under
 streaming, without unbounded buffering) were both deliberately left
 unspecified — they're the hardest engineering and the most user-visible API
 surface, respectively. Both are resolved in `DESIGN.md`, with the rejected
@@ -162,7 +162,7 @@ pending human review** rather than settled by fiat.
 
 ## Measured, not asserted
 
-Per `spec.md` §5, two numbers are published here rather than assumed.
+Per `SPEC.md` §5, two numbers are published here rather than assumed.
 
 ### Adoption cost
 
@@ -240,7 +240,7 @@ is what makes that visible.
   adoption budget. Every response's `description` field in the emitted
   document is therefore a fixed placeholder ("Observed 200 response."),
   derived from the recording and not from any handler — a reader must not
-  mistake it for the handler's doc comment. See `spec.md`'s "Not in v1" table
+  mistake it for the handler's doc comment. See `SPEC.md`'s "Not in v1" table
   and `DESIGN.md` §3.
 - Request bodies are documented only when they're JSON. A non-JSON request
   body is recorded as content-type and length and nothing else (`DESIGN.md`

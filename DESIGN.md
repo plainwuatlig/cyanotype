@@ -1,6 +1,6 @@
 # DESIGN.md — the two gaps the spec left open
 
-`spec.md` (§4.2 and §3) deliberately leaves two shapes unspecified because they
+`SPEC.md` (§4.2 and §3) deliberately leaves two shapes unspecified because they
 are the API surface and the hardest engineering, respectively. Both decisions
 below were **reviewed and ratified by Plain on 2026-09-22** ("do those you
 mentioned" — a blanket ratification of the agent decisions flagged here, after
@@ -192,7 +192,7 @@ Independent code review (`code-review` skill, spec axis) caught that §4.4
 that this had gone undisclosed in both DESIGN.md and the README's own
 Limitations list — a silent drop, not a stated cut. This section closed the
 disclosure gap; the ruling has since closed the gap itself. **§4.4 is cut from
-the spec** (`spec.md`'s "Not in v1" table, amended 2026-09-22), so this is no
+the spec** (`SPEC.md`'s "Not in v1" table, amended 2026-09-22), so this is no
 longer an open question and no longer a defect: it is the product.
 
 **The obstacle was structural, not effort.** A Rust `///` doc comment compiles
