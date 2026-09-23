@@ -98,7 +98,7 @@ fn operation_object(
         }
         // This is a generic, response-object-level description, not the
         // operation-level prose §4.4 means ("handler doc comments").
-        // §4.4 is cut, not implemented — see `spec.md`'s "Not in v1" table,
+        // §4.4 is cut, not implemented — see `SPEC.md`'s "Not in v1" table,
         // `DESIGN.md` §3, and README's Limitations for the disclosure.
         let mut response_obj = json!({
             "description": format!("Observed {status} response."),

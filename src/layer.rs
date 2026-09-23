@@ -1,7 +1,7 @@
 //! The recorder itself: a `tower::Layer`/`Service` pair installed via
 //! `Router::route_layer` (not `Router::layer`) so that `MatchedPath` is
 //! already present in the request extensions by the time [`RecordService`]
-//! runs — verified against axum's own routing per `spec.md` §3.
+//! runs — verified against axum's own routing per `SPEC.md` §3.
 
 use std::convert::Infallible;
 use std::future::Future;

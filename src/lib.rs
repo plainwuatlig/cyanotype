@@ -69,7 +69,7 @@ pub use redact::{Redactions, configure};
 /// Internally this installs the recorder via [`axum::Router::route_layer`]
 /// rather than [`axum::Router::layer`], because only a route-level layer
 /// runs after axum has inserted `MatchedPath` into the request — see
-/// `spec.md` §3 and `src/layer.rs`.
+/// `SPEC.md` §3 and `src/layer.rs`.
 pub fn record<S>(router: Router<S>) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
